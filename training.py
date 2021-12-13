@@ -18,7 +18,7 @@ from torchvision import datasets, transforms
 # Check CUDA availability
 dev = torch.device('cuda' if torch.cuda.is_available else 'cpu')
 
-# DATA -----------------------------------------------------------------
+# DATA -----------------------------------------------------------------------------------------------------------
 # Transform the dataset pictures to match the used training pictures 
 # 1. Normalize pictures (0,1)
 # 2. Resize (224x224)
@@ -82,6 +82,7 @@ def get_dicts():
     dicts = torch.load('./weights/dicts')
     return dicts['stoi'], dicts['itos']
 
+# TRAINING ----------------------------------------------------------------------------------------------------
 
 def main(args):
 
@@ -97,56 +98,68 @@ def main(args):
     # Load neural network model
     cnn_cnn = model.CNN_CNN_HA_CE(len(stoi), 300, n_layers=args.n_layers, train_cnn=True).to(dev)
 
-    # Si existe una red preentrenada, cargarla
+    # Load pretrained neural network if it exists 
     cnn_cnn.load()
 
-    # algoritmo que actualizara los pesos de las redes
+    # Define optimizer for training stage 
+
+	# LEARNING RATE HACE UNA COSA RARA	
     optimizer = optim.Adam([
         {'params': cnn_cnn.language_module_att.parameters()},
         {'params': cnn_cnn.prediction_module.parameters()},
-        {'params': cnn_cnn.vision_module.parameters(), 'lr': 1e-5, 'weight_decay': 0.5e-5}
-    ], lr=1e-4, weight_decay=0.1e-5)
+        {'params': cnn_cnn.vision_module.parameters(), 'lr': 1e-5, 'weight_decay': 0.5e-5}], 
+		lr=1e-4, weight_decay=0.1e-5)
 
-    # Funcion de perdida a usar: Entropia cruzada ya que los elementos a predecir (palabras)
-    # son mutuamente exlusivos (solo se puede elegir una palabra)
+	# Define loss function. Cross Entropy because the prediction is just one word (Good for classification problems)
     criterion = torch.nn.NLLLoss()
 
-    # Set de validacion
-    cap = datasets.CocoCaptions(root = args.val_image_folder,
-                                annFile = args.val_captions_file,
-                                transform = transforms.Compose([
-                                    transforms.Resize((224, 224)),
-                                    transforms.ToTensor(),
-                                    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229,0.224, 0.225])]))
+    # Define transformation 
+    transform = transforms.Compose([
+        transforms.Resize((224,224)),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229,0.224, 0.225])])
 
-    ## ------------------------------------------------------------
-    ## ------------------------------------------------------------
-    ## -------------- Bucle de entrenamiento ----------------------
+    # Define validation set
+    cap = datasets.CocoCaptions(root = args.val_image_path,
+                                annFile = args.val_captions_path,
+                                transform = transform)
+
+	# TRAINING LOOP -------------------------------------------------------------------------------------------
     current_batch = 0
     score_bleu_1 = []
     score_bleu_2 = []
     score_bleu_3 = []
     score_bleu_4 = []
+
+	# For each epoch in training...
     for e in range(args.epochs):
         # Crear un generador
-        trainloader = dataloader(args.image_folder, args.captions_file, args.batch_size, stoi)
+        train_loader = load_data(args.images_path, args.captions_path, args.batch_size, stoi)
 
         epoch_losses = []
-        for batch, (images, captions) in enumerate(trainloader):
+		# Get the images and captions for the current batch ?????
+        for batch, (images, captions) in enumerate(train_loader):
             current_batch += 1
 
-            # Pasa las imagenes a la tarjeta grafica en caso de que haya una
+            # Load images to the GPU if it exists 
             images_v = images.to(dev)
 
-            # Crear embeddings para entrenar. Entradas al modelo
+			# Create embeddings for training.
+			# Each word has a vectorial representation, so words with simmilar meanings have simmilar representations. 
+            # The embeddings are the inputs to the model. 
             train_labels = [['<s>'] + label for label in captions]
             expected_labels = [label + ['</s>'] for label in captions]
+
             train_indices = [[stoi[word] for word in label] for label in train_labels]
             expected_indices = [[stoi[word] for word in label] for label in expected_labels]
+
             max_length = max([len(label) for label in train_indices])
             train_indices_v = torch.stack([F.pad(torch.tensor(label), pad=(0, max_length-len(label)), mode='constant', value=-1) for label in train_indices])
             expected_indices_v = torch.stack([F.pad(torch.tensor(label), pad=(0, max_length-len(label)), mode='constant', value=-1) for label in expected_indices])
-            train_indices_v = train_indices_v.to(dev)
+           
+			
+            # Load embeddings to the GPU if it exists 
+			train_indices_v = train_indices_v.to(dev)
             expected_indices_v = expected_indices_v.to(dev)
 
             # Genera la lista de indices validos para el entrenamiento, ya que muchas frases tendran
