@@ -120,7 +120,7 @@ def main(args):
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229,0.224, 0.225])])
 
     # Define validation set
-    cap = datasets.CocoCaptions(root = args.val_image_path,
+    data = datasets.CocoCaptions(root = args.val_image_path,
                                 annFile = args.val_captions_path,
                                 transform = transform)
 
@@ -166,49 +166,50 @@ def main(args):
 			train_ind_pad = train_ind_pad.to(dev)
             expected_ind_pad = expected_ind_pad.to(dev)
 
-            # Genera la lista de indices validos para el entrenamiento, ya que muchas frases tendran
-            # padding y los resultados de pasar por el padding no son validos
+############# Generate valid indices for training, removing padding
             train_ind_valid = []
             for i, label in enumerate(train_labels):
                 train_ind_valid = train_ind_valid + [j for j in range(i*(max_length), i*(max_length) + len(label))]
 
-            # Desenrolla las salidas y las guarda en un tensor
             expected_ind_valid = expected_ind_pad.view(-1)[train_ind_valid]
 
-#-------------------------
-            # Limpia los optimizadores
+			# GET predictions and UPDATE weights
+			# ----------------------------------
+            # Clean the optimizer
             optimizer.zero_grad()
 
-            # Calcula las predicciones
+            # Get the CNN prediction
             outputs = cnn_cnn(images, train_ind_pad)
 
-            # Desenrolla las frases generadas para poder pasarlas por la funcion de perdida
+            # Remove padding from the generated captions so the loss can be calculated
             outputs = outputs.view(-1, cnn_cnn.vocab_size)
 
-            # Calcula la pérdida para actualizar las redes
+            # Calculate loss function
             loss = criterion(outputs[train_ind_valid], expected_ind_valid)
 
-            # Actualizar los pesos
+            # Update the weights
             loss.backward()
 
             # Clip gradients
             torch.nn.utils.clip_grad_norm_(cnn_cnn.parameters(), 1.0)
 
-            # Paso del optimizador
+            # Optimizer step
             optimizer.step()
 
             epoch_losses.append(loss.item())
 
-            # Informar sobre el estado del entrenamiento
+            # Show the training state
             if batch % 500 == 0 and batch != 0:
-                # if i % 100 == 0 and i != 0:
-                # Actualizar tensorboard
-                mean_batch_loss = np.mean(epoch_losses[-500:])
+                # Calculate the mean loss in this batch
+				mean_batch_loss = np.mean(epoch_losses[-500:])
+                
+				# Update tensorboard
                 writer.add_scalar('Training loss', mean_batch_loss, current_batch)
 
                 # Imprimir status
                 print('Epoch: {}\tBatch: {}\t\tTraining loss: {}'.format(e, batch, mean_batch_loss))
 
+		# CALCULATE BLEU score for this epoch
         else:
             print('--- Calculating BLEU score for epoch {}'.format(e))
             spell = SpellChecker(distance=1)
@@ -217,11 +218,11 @@ def main(args):
             score_bleu_3_epoch = 0
             score_bleu_4_epoch = 0
             for i in range(len(cap)):
-            # for i in range(20):
-                # Obtener una imagen con sus captions y cargarla en la tarjeta si hay una
-                img, target = cap[i]
+                # Get one image and its caption and load it to the GPU if exists
+                img, target = data[i]
                 img = img.to(dev).view(1, *img.shape)
-                # Obtener el valor de precisión de la frase predicha utilizando BLEU
+
+                # Calculate the precision of the predicted phrase using BLEU
                 sentence = cnn_cnn.sample(img, stoi, itos)[0]
                 captions = [[word if word in stoi else spell.correction(word) for word in re.findall(r"[\w']+|[.,!?;]", target[i].lower())] for i in range(len(target))]
                 score_bleu_1_epoch += sentence_bleu(captions, sentence, weights=(1.0, 0.0, 0.0, 0.0))
@@ -233,7 +234,6 @@ def main(args):
             score_bleu_2.append(score_bleu_2_epoch / len(cap))
             score_bleu_3.append(score_bleu_3_epoch / len(cap))
             score_bleu_4.append(score_bleu_4_epoch / len(cap))
-            # score_history.append(score / 20)
 
             if (score_bleu_4[-1] == max(score_bleu_4)):
                 print("Model saved!")
