@@ -133,57 +133,60 @@ def main(args):
 
 	# For each epoch in training...
     for e in range(args.epochs):
-        # Crear un generador
+        # Load the data from dataset
         train_loader = load_data(args.images_path, args.captions_path, args.batch_size, stoi)
 
         epoch_losses = []
-		# Get the images and captions for the current batch ?????
+######### Get the images and captions for the current batch ?????
         for batch, (images, captions) in enumerate(train_loader):
             current_batch += 1
 
             # Load images to the GPU if it exists 
-            images_v = images.to(dev)
+            images = images.to(dev)
 
-			# Create embeddings for training.
+			# CREATE embeddings for training.
+			# -------------------------------
 			# Each word has a vectorial representation, so words with simmilar meanings have simmilar representations. 
             # The embeddings are the inputs to the model. 
+
+############# Add the begining and the ending character acording to the documentation
             train_labels = [['<s>'] + label for label in captions]
             expected_labels = [label + ['</s>'] for label in captions]
 
-            train_indices = [[stoi[word] for word in label] for label in train_labels]
-            expected_indices = [[stoi[word] for word in label] for label in expected_labels]
+			# Get the index for each word in each label
+            train_ind = [[stoi[word] for word in label] for label in train_labels]
+            expected_ind = [[stoi[word] for word in label] for label in expected_labels]
 
-            max_length = max([len(label) for label in train_indices])
-            train_indices_v = torch.stack([F.pad(torch.tensor(label), pad=(0, max_length-len(label)), mode='constant', value=-1) for label in train_indices])
-            expected_indices_v = torch.stack([F.pad(torch.tensor(label), pad=(0, max_length-len(label)), mode='constant', value=-1) for label in expected_indices])
-           
+			# Resize all the captions index using padding so they are the same len
+            max_length = max([len(label) for label in train_ind])
+            train_ind_pad = torch.stack([F.pad(torch.tensor(label), pad=(0, max_length-len(label)), mode='constant', value=-1) for label in train_ind])
+            expected_ind_pad = torch.stack([F.pad(torch.tensor(label), pad=(0, max_length-len(label)), mode='constant', value=-1) for label in expected_ind])
 			
             # Load embeddings to the GPU if it exists 
-			train_indices_v = train_indices_v.to(dev)
-            expected_indices_v = expected_indices_v.to(dev)
+			train_ind_pad = train_ind_pad.to(dev)
+            expected_ind_pad = expected_ind_pad.to(dev)
 
             # Genera la lista de indices validos para el entrenamiento, ya que muchas frases tendran
             # padding y los resultados de pasar por el padding no son validos
-            valid_training_indices = []
+            train_ind_valid = []
             for i, label in enumerate(train_labels):
-                valid_training_indices = valid_training_indices + [j for j in range(i*(max_length), i*(max_length) + len(label))]
+                train_ind_valid = train_ind_valid + [j for j in range(i*(max_length), i*(max_length) + len(label))]
 
             # Desenrolla las salidas y las guarda en un tensor
-            # flat_expected_ids = [i for ids in expected_ids for i in ids]
-            # valid_expected_v = torch.LongTensor(expected_indices_v.view(-1)[valid_training_indices]).to(dev)
-            valid_expected_v = expected_indices_v.view(-1)[valid_training_indices]
+            expected_ind_valid = expected_ind_pad.view(-1)[train_ind_valid]
 
+#-------------------------
             # Limpia los optimizadores
             optimizer.zero_grad()
 
             # Calcula las predicciones
-            outputs_v = cnn_cnn(images_v, train_indices_v)
+            outputs = cnn_cnn(images, train_ind_pad)
 
             # Desenrolla las frases generadas para poder pasarlas por la funcion de perdida
-            outputs_v = outputs_v.view(-1, cnn_cnn.vocab_size)
+            outputs = outputs.view(-1, cnn_cnn.vocab_size)
 
             # Calcula la pérdida para actualizar las redes
-            loss = criterion(outputs_v[valid_training_indices], valid_expected_v)
+            loss = criterion(outputs[train_ind_valid], expected_ind_valid)
 
             # Actualizar los pesos
             loss.backward()
@@ -196,7 +199,7 @@ def main(args):
 
             epoch_losses.append(loss.item())
 
-            # Informar sobre el estado del entrenamiento, cada 100 batches
+            # Informar sobre el estado del entrenamiento
             if batch % 500 == 0 and batch != 0:
                 # if i % 100 == 0 and i != 0:
                 # Actualizar tensorboard
