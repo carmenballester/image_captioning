@@ -120,7 +120,7 @@ def main(args):
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229,0.224, 0.225])])
 
     # Define validation set
-    data = datasets.CocoCaptions(root = args.val_image_path,
+    validation_data = datasets.CocoCaptions(root = args.val_image_path,
                                 annFile = args.val_captions_path,
                                 transform = transform)
 
@@ -137,7 +137,7 @@ def main(args):
         train_loader = load_data(args.images_path, args.captions_path, args.batch_size, stoi)
 
         epoch_losses = []
-######### Get the images and captions for the current batch ?????
+		# Get the images and captions for the current batch ?????
         for batch, (images, captions) in enumerate(train_loader):
             current_batch += 1
 
@@ -149,7 +149,7 @@ def main(args):
 			# Each word has a vectorial representation, so words with simmilar meanings have simmilar representations. 
             # The embeddings are the inputs to the model. 
 
-############# Add the begining and the ending character acording to the documentation
+			# Add the begining and the ending character acording to the documentation
             train_labels = [['<s>'] + label for label in captions]
             expected_labels = [label + ['</s>'] for label in captions]
 
@@ -166,12 +166,12 @@ def main(args):
 			train_ind_pad = train_ind_pad.to(dev)
             expected_ind_pad = expected_ind_pad.to(dev)
 
-############# Generate valid indices for training, removing padding
-            train_ind_valid = []
+			# Generate valid indices for training, removing padding
+            train_ind_vect = []
             for i, label in enumerate(train_labels):
-                train_ind_valid = train_ind_valid + [j for j in range(i*(max_length), i*(max_length) + len(label))]
+                train_ind_vect = train_ind_vect + [j for j in range(i*(max_length), i*(max_length) + len(label))]
 
-            expected_ind_valid = expected_ind_pad.view(-1)[train_ind_valid]
+            expected_ind_valid = expected_ind_pad.view(-1)[train_ind_vect]
 
 			# GET predictions and UPDATE weights
 			# ----------------------------------
@@ -181,11 +181,11 @@ def main(args):
             # Get the CNN prediction
             outputs = cnn_cnn(images, train_ind_pad)
 
-            # Remove padding from the generated captions so the loss can be calculated
+            # Resize output for calculating loss function
             outputs = outputs.view(-1, cnn_cnn.vocab_size)
 
-            # Calculate loss function
-            loss = criterion(outputs[train_ind_valid], expected_ind_valid)
+            # Calculate loss function without padding
+            loss = criterion(outputs[train_ind_vect], expected_ind_valid)
 
             # Update the weights
             loss.backward()
@@ -219,26 +219,45 @@ def main(args):
             score_bleu_4_epoch = 0
             for i in range(len(cap)):
                 # Get one image and its caption and load it to the GPU if exists
-                img, target = data[i]
+                img, target = validation_data[i]
                 img = img.to(dev).view(1, *img.shape)
 
                 # Calculate the precision of the predicted phrase using BLEU
                 sentence = cnn_cnn.sample(img, stoi, itos)[0]
-                captions = [[word if word in stoi else spell.correction(word) for word in re.findall(r"[\w']+|[.,!?;]", target[i].lower())] for i in range(len(target))]
+
+                #captions = [[word if word in stoi else spell.correction(word) for word in re.findall(r"[\w']+|[.,!?;]", target[i].lower())] for i in range(len(target))]
+
+				for i in range(len(target)):
+		            # Get each caption for the image and for each word in it...
+		            for word in re.findall(r"[\w']+|[.,!?;]", target[i].lower()):
+		                # If word is in generated dictionary, add it to captions 
+		                if word in stoi: 
+		                    captions.append(word)
+		                
+		                # If not, correct it before adding 
+		                else: 
+		                    captions.append(spell.correction(word))
+
+	           	# Compare the tho phrases in differents word groups (see doc for further information) 
+				# Sum of all the images in the validation dataset
                 score_bleu_1_epoch += sentence_bleu(captions, sentence, weights=(1.0, 0.0, 0.0, 0.0))
                 score_bleu_2_epoch += sentence_bleu(captions, sentence, weights=(0.5, 0.5, 0.0, 0.0))
                 score_bleu_3_epoch += sentence_bleu(captions, sentence, weights=(0.333, 0.333, 0.333, 0.0))
                 score_bleu_4_epoch += sentence_bleu(captions, sentence, weights=(0.25, 0.25, 0.25, 0.25))
 
-            score_bleu_1.append(score_bleu_1_epoch / len(cap))
-            score_bleu_2.append(score_bleu_2_epoch / len(cap))
-            score_bleu_3.append(score_bleu_3_epoch / len(cap))
-            score_bleu_4.append(score_bleu_4_epoch / len(cap))
+			# Add the epoch mean BLUE score to the global BLUE score vector
+            score_bleu_1.append(score_bleu_1_epoch/len(validation_data))
+            score_bleu_2.append(score_bleu_2_epoch/len(validation_data))
+            score_bleu_3.append(score_bleu_3_epoch/len(validation_data))
+            score_bleu_4.append(score_bleu_4_epoch/len(validation_data))
 
+			# Check if training is improving the performance
+			# If not, save the trained model
             if (score_bleu_4[-1] == max(score_bleu_4)):
                 print("Model saved!")
                 cnn_cnn.save()
 
+			# Show information in tensorboard
             writer.add_scalar('BLEU-1', score_bleu_1[-1], e)
             writer.add_scalar('BLEU-2', score_bleu_2[-1], e)
             writer.add_scalar('BLEU-3', score_bleu_3[-1], e)
