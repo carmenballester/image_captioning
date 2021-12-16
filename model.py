@@ -155,7 +155,7 @@ class CNN_CNN(nn.Module):
         super(CNN_CNN, self).__init__()
 
         ## Parametros
-        # k: tamaño del kernel
+        # k: tamanio del kernel
         self.k = 3
         # Longitud maxima de las frases generadas
         self.max_length = max_length
@@ -278,7 +278,7 @@ class CNN_CNN_CE(nn.Module):
         self.n_layers = n_layers
 
         ## Parametros
-        # k: tamaño del kernel
+        # k: tamanio del kernel
         self.k = 3
         # Longitud maxima de las frases generadas
         self.max_length = max_length
@@ -366,7 +366,7 @@ class CNN_CNN_HA_CE(nn.Module):
         self.n_layers = n_layers
 
         ## Parametros
-        # k: tamaño del kernel
+        # k: tamanio del kernel
         self.k = 3
         # Longitud maxima de las frases generadas
         self.max_length = max_length
